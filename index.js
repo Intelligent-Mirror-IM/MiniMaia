@@ -11,31 +11,49 @@ const openai = new OpenAI({
   apiKey: process.env.GPT_KEY,
 });
 
-const askGPT4 = async (prompt) => {
-  try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4",
-      messages: [
+const conversationStore = {
+  records: new Map(),
+  getUserConverstation: function (userId) {
+    if (!this.records.has(userId))
+      this.records.set(userId, [
         {
           role: "system",
-          content:
-            "You are Maia, a smart mirror assistant who greets users based on their emotions in only 10 words.",
+          content: "You are Maia, a smart mirror assistant.",
         },
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-      max_tokens: 20,
+      ]);
+    return this.records.get(userId);
+  },
+};
+const askGPT4 = async (prompt, userId) => {
+  try {
+    const messages = conversationStore.getUserConverstation(userId);
+    messages.push({
+      role: "user",
+      content: prompt,
+    });
+
+    const limitedMessages =
+      messages.length > 21
+        ? [messages[0]].concat(messages.slice(messages.length - 20))
+        : messages;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4",
+      messages: limitedMessages,
+      max_tokens: 50,
       temperature: 0.7,
     });
+    messages.push({
+      role: "assistant",
+      content: response.choices[0].message.content,
+    });
+    console.log(response.choices[0].message.content);
     return response.choices[0].message.content;
   } catch (error) {
     console.error("Error:", error);
     throw error;
   }
 };
-dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
@@ -63,7 +81,9 @@ const connectToBackend = (serverUrl) => {
   socket.on("processAiRequest", async (data) => {
     console.log(data);
     try {
-      const response = await askGPT4(data["prompt"]);
+      const userId = data.userId || socket.id;
+
+      const response = await askGPT4(data["prompt"], userId);
       socket.emit("aiResponse", {
         requestId: data.requestId,
         response: response || "No response sorry..",
@@ -81,7 +101,7 @@ const connectToBackend = (serverUrl) => {
   return socket;
 };
 
-const aiSocket = connectToBackend("http://maiasalt.online:5200");
+const aiSocket = connectToBackend("http://localhost:5200");
 
 socketServer.on("connection", (socket) => {
   console.log("Client connected");
